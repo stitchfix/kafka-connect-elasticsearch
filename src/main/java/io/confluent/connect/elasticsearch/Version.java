@@ -19,6 +19,7 @@ package io.confluent.connect.elasticsearch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.InputStream;
 import java.util.Properties;
 
 public class Version {
@@ -30,8 +31,10 @@ public class Version {
   static {
     try {
       Properties props = new Properties();
-      props.load(Version.class.getResourceAsStream(VERSION_FILE));
-      version = props.getProperty("version", version).trim();
+      try (InputStream versionFileStream = Version.class.getResourceAsStream(VERSION_FILE)) {
+        props.load(versionFileStream);
+        version = props.getProperty("version", version).trim();
+      }
     } catch (Exception e) {
       log.warn("Error while loading version:", e);
     }

@@ -40,7 +40,8 @@ public class ElasticsearchSinkConnector extends SinkConnector {
   public void start(Map<String, String> props) throws ConnectException {
     try {
       configProperties = props;
-      ElasticsearchSinkConnectorConfig config = new ElasticsearchSinkConnectorConfig(props);
+      // validation
+      new ElasticsearchSinkConnectorConfig(props);
     } catch (ConfigException e) {
       throw new ConnectException(
           "Couldn't start ElasticsearchSinkConnector due to configuration error",
