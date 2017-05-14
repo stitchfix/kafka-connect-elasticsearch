@@ -42,7 +42,10 @@ public class ElasticsearchSinkConnector extends SinkConnector {
       configProperties = props;
       ElasticsearchSinkConnectorConfig config = new ElasticsearchSinkConnectorConfig(props);
     } catch (ConfigException e) {
-      throw new ConnectException("Couldn't start ElasticsearchSinkConnector due to configuration error", e);
+      throw new ConnectException(
+          "Couldn't start ElasticsearchSinkConnector due to configuration error",
+          e
+      );
     }
   }
 
