@@ -162,9 +162,7 @@ public class DataConverter {
     Schema keySchema = schema.keySchema();
     Schema valueSchema = schema.valueSchema();
     String keyName = keySchema.name() == null ? keySchema.type().name() : keySchema.name();
-    String valueName = valueSchema.name() == null
-                       ? valueSchema.type().name()
-                       : valueSchema.name();
+    String valueName = valueSchema.name() == null ? valueSchema.type().name() : valueSchema.name();
     Schema preprocessedKeySchema = preProcessSchema(keySchema);
     Schema preprocessedValueSchema = preProcessSchema(valueSchema);
     if (keySchema.type() == Schema.Type.STRING) {
@@ -273,8 +271,10 @@ public class DataConverter {
     if (keySchema.type() == Schema.Type.STRING) {
       Map<Object, Object> processedMap = new HashMap<>();
       for (Map.Entry<?, ?> entry: map.entrySet()) {
-        processedMap.put(preProcessValue(entry.getKey(), keySchema, newSchema.keySchema()),
-                         preProcessValue(entry.getValue(), valueSchema, newValueSchema));
+        processedMap.put(
+            preProcessValue(entry.getKey(), keySchema, newSchema.keySchema()),
+            preProcessValue(entry.getValue(), valueSchema, newValueSchema)
+        );
       }
       return processedMap;
     }
