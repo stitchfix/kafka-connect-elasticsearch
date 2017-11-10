@@ -13,8 +13,10 @@
  * License for the specific language governing permissions and limitations under
  * the License.
  **/
+
 package io.confluent.connect.elasticsearch.bulk;
 
+import io.confluent.connect.elasticsearch.RetryUtil;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.slf4j.Logger;
@@ -61,7 +63,8 @@ public class BulkProcessor<R, B> {
   private volatile boolean flushRequested = false;
   private final AtomicReference<ConnectException> error = new AtomicReference<>();
 
-  // shared state, synchronized on (this), may be part of wait() conditions so need notifyAll() on changes
+  // shared state, synchronized on (this), may be part of wait() conditions so need notifyAll() on
+  // changes
   private final Deque<R> unsentRecords;
   private int inFlightRecords = 0;
 
@@ -92,17 +95,20 @@ public class BulkProcessor<R, B> {
 
   private ThreadFactory makeThreadFactory() {
     final AtomicInteger threadCounter = new AtomicInteger();
-    final Thread.UncaughtExceptionHandler uncaughtExceptionHandler = new Thread.UncaughtExceptionHandler() {
-      @Override
-      public void uncaughtException(Thread t, Throwable e) {
-        log.error("Uncaught exception in BulkProcessor thread {}", t, e);
-        failAndStop(e);
-      }
-    };
+    final Thread.UncaughtExceptionHandler uncaughtExceptionHandler =
+        new Thread.UncaughtExceptionHandler() {
+          @Override
+          public void uncaughtException(Thread t, Throwable e) {
+            log.error("Uncaught exception in BulkProcessor thread {}", t, e);
+            failAndStop(e);
+          }
+        };
     return new ThreadFactory() {
       @Override
       public Thread newThread(Runnable r) {
-        final Thread t = new Thread(r, String.format("BulkProcessor@%d-%d", System.identityHashCode(this), threadCounter.getAndIncrement()));
+        final int threadId = threadCounter.getAndIncrement();
+        final int objId = System.identityHashCode(this);
+        final Thread t = new Thread(r, String.format("BulkProcessor@%d-%d", objId, threadId));
         t.setDaemon(true);
         t.setUncaughtExceptionHandler(uncaughtExceptionHandler);
         return t;
@@ -132,7 +138,8 @@ public class BulkProcessor<R, B> {
     for (long waitStartTimeMs = time.milliseconds(), elapsedMs = 0;
          !stopRequested && !canSubmit(elapsedMs);
          elapsedMs = time.milliseconds() - waitStartTimeMs) {
-      // when linger time has already elapsed, we still have to ensure the other submission conditions hence the wait(0) in that case
+      // when linger time has already elapsed, we still have to ensure the other submission
+      // conditions hence the wait(0) in that case
       wait(Math.max(0, lingerMs - elapsedMs));
     }
     // at this point, either stopRequested or canSubmit
@@ -173,7 +180,8 @@ public class BulkProcessor<R, B> {
   /**
    * Initiate shutdown.
    *
-   * Pending buffered records are not automatically flushed, so call {@link #flush(long)} before this method if this is desirable.
+   * <p>Pending buffered records are not automatically flushed, so call {@link #flush(long)} before
+   * this method if this is desirable.
    */
   public void stop() {
     log.trace("stop");
@@ -188,7 +196,7 @@ public class BulkProcessor<R, B> {
   /**
    * Block upto {@code timeoutMs} till shutdown is complete.
    *
-   * This should only be called after a previous {@link #stop()} invocation.
+   * <p>This should only be called after a previous {@link #stop()} invocation.
    */
   public void awaitStop(long timeoutMs) {
     log.trace("awaitStop {}", timeoutMs);
@@ -252,9 +260,11 @@ public class BulkProcessor<R, B> {
   }
 
   /**
-   * Add a record, may block upto {@code timeoutMs} if at capacity with respect to {@code maxBufferedRecords}.
+   * Add a record, may block upto {@code timeoutMs} if at capacity with respect to
+   * {@code maxBufferedRecords}.
    *
-   * If any task has failed prior to or while blocked in the add, or if the timeout expires while blocked, {@link ConnectException} will be thrown.
+   * <p>If any task has failed prior to or while blocked in the add, or if the timeout expires
+   * while blocked, {@link ConnectException} will be thrown.
    */
   public synchronized void add(R record, long timeoutMs) {
     throwIfTerminal();
@@ -283,7 +293,8 @@ public class BulkProcessor<R, B> {
   /**
    * Request a flush and block upto {@code timeoutMs} until all pending records have been flushed.
    *
-   * If any task has failed prior to or during the flush, {@link ConnectException} will be thrown with that error.
+   * <p>If any task has failed prior to or during the flush, {@link ConnectException} will be
+   * thrown with that error.
    */
   public void flush(long timeoutMs) {
     log.trace("flush {}", timeoutMs);
@@ -299,7 +310,8 @@ public class BulkProcessor<R, B> {
         }
         throwIfTerminal();
         if (bufferedRecords() > 0) {
-          throw new ConnectException("Flush timeout expired with unflushed records: " + bufferedRecords());
+          throw new ConnectException("Flush timeout expired with unflushed records: "
+                                     + bufferedRecords());
         }
       }
     } catch (InterruptedException e) {
@@ -338,31 +350,47 @@ public class BulkProcessor<R, B> {
       try {
         bulkReq = bulkClient.bulkRequest(batch);
       } catch (Exception e) {
-        log.error("Failed to create bulk request from batch {} of {} records", batchId, batch.size(), e);
+        log.error(
+            "Failed to create bulk request from batch {} of {} records",
+            batchId,
+            batch.size(),
+            e
+        );
         throw e;
       }
-      for (int remainingRetries = maxRetries; true; remainingRetries--) {
+      final int maxAttempts = maxRetries + 1;
+      for (int attempts = 1, retryAttempts = 0; true; ++attempts, ++retryAttempts) {
         boolean retriable = true;
         try {
-          log.trace("Executing batch {} of {} records", batchId, batch.size());
+          log.trace("Executing batch {} of {} records with attempt {}/{}",
+                  batchId, batch.size(), attempts, maxAttempts);
           final BulkResponse bulkRsp = bulkClient.execute(bulkReq);
           if (bulkRsp.isSucceeded()) {
+            if (attempts > 1) {
+              // We only logged failures, so log the success immediately after a failure ...
+              log.debug("Completed batch {} of {} records with attempt {}/{}",
+                      batchId, batch.size(), attempts, maxAttempts);
+            }
             return bulkRsp;
           }
           retriable = bulkRsp.isRetriable();
           throw new ConnectException("Bulk request failed: " + bulkRsp.getErrorInfo());
         } catch (Exception e) {
-          if (retriable && remainingRetries > 0) {
-            log.warn("Failed to execute batch {} of {} records, retrying after {} ms", batchId, batch.size(), retryBackoffMs, e);
-            time.sleep(retryBackoffMs);
+          if (retriable && attempts < maxAttempts) {
+            long sleepTimeMs = RetryUtil.computeRandomRetryWaitTimeInMillis(retryAttempts,
+                    retryBackoffMs);
+            log.warn("Failed to execute batch {} of {} records with attempt {}/{}, "
+                      + "will attempt retry after {} ms. Failure reason: {}",
+                      batchId, batch.size(), attempts, maxAttempts, sleepTimeMs, e.getMessage());
+            time.sleep(sleepTimeMs);
           } else {
-            log.error("Failed to execute batch {} of {} records", batchId, batch.size(), e);
+            log.error("Failed to execute batch {} of {} records after total of {} attempt(s)",
+                    batchId, batch.size(), attempts, e);
             throw e;
           }
         }
       }
     }
-
   }
 
   private synchronized void onBatchCompletion(int batchSize) {

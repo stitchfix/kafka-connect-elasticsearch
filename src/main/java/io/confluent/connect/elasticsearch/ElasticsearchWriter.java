@@ -49,12 +49,15 @@ public class ElasticsearchWriter {
   private final Map<String, String> topicToIndexMap;
   private final long flushTimeoutMs;
   private final BulkProcessor<IndexableRecord, ?> bulkProcessor;
+  private final boolean dropInvalidMessage;
+  private final DataConverter converter;
 
   private final Set<String> existingMappings;
 
   ElasticsearchWriter(
       JestClient client,
       String type,
+      boolean useCompactMapEntries,
       boolean ignoreKey,
       Set<String> ignoreKeyTopics,
       boolean ignoreSchema,
@@ -66,7 +69,8 @@ public class ElasticsearchWriter {
       int batchSize,
       long lingerMs,
       int maxRetries,
-      long retryBackoffMs
+      long retryBackoffMs,
+      boolean dropInvalidMessage
   ) {
     this.client = client;
     this.type = type;
@@ -76,6 +80,8 @@ public class ElasticsearchWriter {
     this.ignoreSchemaTopics = ignoreSchemaTopics;
     this.topicToIndexMap = topicToIndexMap;
     this.flushTimeoutMs = flushTimeoutMs;
+    this.dropInvalidMessage = dropInvalidMessage;
+    this.converter = new DataConverter(useCompactMapEntries);
 
     bulkProcessor = new BulkProcessor<>(
         new SystemTime(),
@@ -94,6 +100,7 @@ public class ElasticsearchWriter {
   public static class Builder {
     private final JestClient client;
     private String type;
+    private boolean useCompactMapEntries = true;
     private boolean ignoreKey = false;
     private Set<String> ignoreKeyTopics = Collections.emptySet();
     private boolean ignoreSchema = false;
@@ -106,6 +113,7 @@ public class ElasticsearchWriter {
     private long lingerMs;
     private int maxRetry;
     private long retryBackoffMs;
+    private boolean dropInvalidMessage;
 
     public Builder(JestClient client) {
       this.client = client;
@@ -125,6 +133,11 @@ public class ElasticsearchWriter {
     public Builder setIgnoreSchema(boolean ignoreSchema, Set<String> ignoreSchemaTopics) {
       this.ignoreSchema = ignoreSchema;
       this.ignoreSchemaTopics = ignoreSchemaTopics;
+      return this;
+    }
+
+    public Builder setCompactMapEntries(boolean useCompactMapEntries) {
+      this.useCompactMapEntries = useCompactMapEntries;
       return this;
     }
 
@@ -168,10 +181,16 @@ public class ElasticsearchWriter {
       return this;
     }
 
+    public Builder setDropInvalidMessage(boolean dropInvalidMessage) {
+      this.dropInvalidMessage = dropInvalidMessage;
+      return this;
+    }
+
     public ElasticsearchWriter build() {
       return new ElasticsearchWriter(
           client,
           type,
+          useCompactMapEntries,
           ignoreKey,
           ignoreKeyTopics,
           ignoreSchema,
@@ -183,7 +202,8 @@ public class ElasticsearchWriter {
           batchSize,
           lingerMs,
           maxRetry,
-          retryBackoffMs
+          retryBackoffMs,
+          dropInvalidMessage
       );
     }
   }
@@ -193,7 +213,8 @@ public class ElasticsearchWriter {
       final String indexOverride = topicToIndexMap.get(sinkRecord.topic());
       final String index = indexOverride != null ? indexOverride : sinkRecord.topic();
       final boolean ignoreKey = ignoreKeyTopics.contains(sinkRecord.topic()) || this.ignoreKey;
-      final boolean ignoreSchema = ignoreSchemaTopics.contains(sinkRecord.topic()) || this.ignoreSchema;
+      final boolean ignoreSchema =
+          ignoreSchemaTopics.contains(sinkRecord.topic()) || this.ignoreSchema;
 
       if (!ignoreSchema && !existingMappings.contains(index)) {
         try {
@@ -201,16 +222,54 @@ public class ElasticsearchWriter {
             Mapping.createMapping(client, index, type, sinkRecord.valueSchema());
           }
         } catch (IOException e) {
-          // FIXME: concurrent tasks could attempt to create the mapping and one of the requests may fail
+          // FIXME: concurrent tasks could attempt to create the mapping and one of the requests may
+          // fail
           throw new ConnectException("Failed to initialize mapping for index: " + index, e);
         }
         existingMappings.add(index);
       }
 
-      final IndexableRecord indexableRecord = DataConverter.convertRecord(sinkRecord, index, type, ignoreKey, ignoreSchema);
+      final IndexableRecord indexableRecord = tryGetIndexableRecord(
+              sinkRecord,
+              index,
+              ignoreKey,
+              ignoreSchema);
 
-      bulkProcessor.add(indexableRecord, flushTimeoutMs);
+      if (indexableRecord != null) {
+        bulkProcessor.add(indexableRecord, flushTimeoutMs);
+      }
+
     }
+  }
+
+  private IndexableRecord tryGetIndexableRecord(
+          SinkRecord sinkRecord,
+          String index,
+          boolean ignoreKey,
+          boolean ignoreSchema) {
+
+    IndexableRecord indexableRecord = null;
+
+    try {
+      indexableRecord = converter.convertRecord(
+              sinkRecord,
+              index,
+              type,
+              ignoreKey,
+              ignoreSchema);
+    } catch (ConnectException convertException) {
+      if (dropInvalidMessage) {
+        log.error("Can't convert record from topic {} with partition {} and offset {}."
+                   + " Error message: {}",
+                  sinkRecord.topic(),
+                  sinkRecord.kafkaPartition(),
+                  sinkRecord.kafkaOffset(),
+                  convertException.getMessage());
+      } else {
+        throw convertException;
+      }
+    }
+    return indexableRecord;
   }
 
   public void flush() {
@@ -248,7 +307,8 @@ public class ElasticsearchWriter {
         try {
           JestResult result = client.execute(createIndex);
           if (!result.isSucceeded()) {
-            throw new ConnectException("Could not create index:" + index);
+            String msg = result.getErrorMessage() != null ? ": " + result.getErrorMessage() : "";
+            throw new ConnectException("Could not create index '" + index + "'" + msg);
           }
         } catch (IOException e) {
           throw new ConnectException(e);
