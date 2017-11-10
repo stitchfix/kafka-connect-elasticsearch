@@ -73,6 +73,7 @@ public class ElasticsearchSinkTask extends SinkTask {
       int maxInFlightRequests = config.getInt(ElasticsearchSinkConnectorConfig.MAX_IN_FLIGHT_REQUESTS_CONFIG);
       long retryBackoffMs = config.getLong(ElasticsearchSinkConnectorConfig.RETRY_BACKOFF_MS_CONFIG);
       int maxRetry = config.getInt(ElasticsearchSinkConnectorConfig.MAX_RETRIES_CONFIG);
+      boolean ignoreMappingErrors = config.getBoolean(ElasticsearchSinkConnectorConfig.IGNORE_MAPPING_ERRORS_CONFIG);
 
       if (client != null) {
         this.client = client;
@@ -94,7 +95,8 @@ public class ElasticsearchSinkTask extends SinkTask {
           .setBatchSize(batchSize)
           .setLingerMs(lingerMs)
           .setRetryBackoffMs(retryBackoffMs)
-          .setMaxRetry(maxRetry);
+          .setMaxRetry(maxRetry)
+          .setIgnoreMappingErrors(ignoreMappingErrors);
 
       writer = builder.build();
       writer.start();

@@ -51,6 +51,7 @@ public class ElasticsearchWriter {
   private final BulkProcessor<IndexableRecord, ?> bulkProcessor;
 
   private final Set<String> existingMappings;
+  private final boolean ignoreMappingErrors;
 
   ElasticsearchWriter(
       JestClient client,
@@ -66,7 +67,8 @@ public class ElasticsearchWriter {
       int batchSize,
       long lingerMs,
       int maxRetries,
-      long retryBackoffMs
+      long retryBackoffMs,
+      boolean ignoreMappingErrors
   ) {
     this.client = client;
     this.type = type;
@@ -76,6 +78,7 @@ public class ElasticsearchWriter {
     this.ignoreSchemaTopics = ignoreSchemaTopics;
     this.topicToIndexMap = topicToIndexMap;
     this.flushTimeoutMs = flushTimeoutMs;
+    this.ignoreMappingErrors = ignoreMappingErrors;
 
     bulkProcessor = new BulkProcessor<>(
         new SystemTime(),
@@ -85,7 +88,8 @@ public class ElasticsearchWriter {
         batchSize,
         lingerMs,
         maxRetries,
-        retryBackoffMs
+        retryBackoffMs,
+        ignoreMappingErrors
     );
 
     existingMappings = new HashSet<>();
@@ -106,6 +110,7 @@ public class ElasticsearchWriter {
     private long lingerMs;
     private int maxRetry;
     private long retryBackoffMs;
+    private boolean ignoreMappingErrors;
 
     public Builder(JestClient client) {
       this.client = client;
@@ -168,6 +173,11 @@ public class ElasticsearchWriter {
       return this;
     }
 
+    public Builder setIgnoreMappingErrors(boolean ignoreMappingErrors) {
+      this.ignoreMappingErrors = ignoreMappingErrors;
+      return this;
+    }
+
     public ElasticsearchWriter build() {
       return new ElasticsearchWriter(
           client,
@@ -183,7 +193,8 @@ public class ElasticsearchWriter {
           batchSize,
           lingerMs,
           maxRetry,
-          retryBackoffMs
+          retryBackoffMs,
+          ignoreMappingErrors
       );
     }
   }

@@ -40,6 +40,7 @@ public class ElasticsearchSinkConnectorConfig extends AbstractConfig {
   public static final String TOPIC_KEY_IGNORE_CONFIG = "topic.key.ignore";
   public static final String SCHEMA_IGNORE_CONFIG = "schema.ignore";
   public static final String TOPIC_SCHEMA_IGNORE_CONFIG = "topic.schema.ignore";
+  public static final String IGNORE_MAPPING_ERRORS_CONFIG = "ignore.mapping.errors";
 
   protected static ConfigDef baseConfigDef() {
     final ConfigDef configDef = new ConfigDef();
@@ -80,7 +81,10 @@ public class ElasticsearchSinkConnectorConfig extends AbstractConfig {
           .define(RETRY_BACKOFF_MS_CONFIG, Type.LONG, 100L, Importance.LOW,
                   "How long to wait in milliseconds before attempting to retry a failed indexing request. "
                   + "This avoids retrying in a tight loop under failure scenarios.",
-                  group, ++order, Width.SHORT, "Retry Backoff (ms)");
+                  group, ++order, Width.SHORT, "Retry Backoff (ms)")
+          .define(IGNORE_MAPPING_ERRORS_CONFIG, Type.BOOLEAN, false, Importance.LOW,
+          "Whether to ignore mapper_parsing_exceptions thrown by Elasticsearch upon indexing malformed documents.",
+                  group, ++order, Width.SHORT, "Ignore Mapping Errors mode");
     }
 
     {
