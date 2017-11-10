@@ -78,6 +78,7 @@ public class ElasticsearchSinkConnectorConfig extends AbstractConfig {
   public static final String TOPIC_KEY_IGNORE_CONFIG = "topic.key.ignore";
   public static final String SCHEMA_IGNORE_CONFIG = "schema.ignore";
   public static final String TOPIC_SCHEMA_IGNORE_CONFIG = "topic.schema.ignore";
+  public static final String IGNORE_MAPPING_ERRORS_CONFIG = "ignore.mapping.errors";
   public static final String DROP_INVALID_MESSAGE_CONFIG = "drop.invalid.message";
 
   private static final String KEY_IGNORE_DOC =
@@ -96,6 +97,9 @@ public class ElasticsearchSinkConnectorConfig extends AbstractConfig {
       + TOPIC_SCHEMA_IGNORE_CONFIG + "`` to override as ``true`` for specific topics.";
   private static final String TOPIC_SCHEMA_IGNORE_DOC =
       "List of topics for which ``" + SCHEMA_IGNORE_CONFIG + "`` should be ``true``.";
+  private static final String IGNORE_MAPPING_ERRORS_DOC = 
+      "Whether to ignore mapper_parsing_exceptions thrown by Elasticsearch upon indexing "
+      + "malformed documents.";
   private static final String DROP_INVALID_MESSAGE_DOC =
           "Whether to drop kafka message when it cannot be converted to output message.";
 
@@ -199,7 +203,16 @@ public class ElasticsearchSinkConnectorConfig extends AbstractConfig {
         ++order,
         Width.SHORT,
         "Retry Backoff (ms)"
-      );
+      ).define(
+        IGNORE_MAPPING_ERRORS_CONFIG,
+        Type.BOOLEAN,
+        false,
+        Importance.LOW,
+        IGNORE_MAPPING_ERRORS_DOC,
+        group,
+        ++order,
+        Width.SHORT,
+        "Ignore Mapping Errors mode");
   }
 
   private static void addConversionConfigs(ConfigDef configDef) {

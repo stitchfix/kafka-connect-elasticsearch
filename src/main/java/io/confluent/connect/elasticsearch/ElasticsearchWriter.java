@@ -53,6 +53,7 @@ public class ElasticsearchWriter {
   private final DataConverter converter;
 
   private final Set<String> existingMappings;
+  private final boolean ignoreMappingErrors;
 
   ElasticsearchWriter(
       JestClient client,
@@ -70,6 +71,7 @@ public class ElasticsearchWriter {
       long lingerMs,
       int maxRetries,
       long retryBackoffMs,
+      boolean ignoreMappingErrors
       boolean dropInvalidMessage
   ) {
     this.client = client;
@@ -80,6 +82,7 @@ public class ElasticsearchWriter {
     this.ignoreSchemaTopics = ignoreSchemaTopics;
     this.topicToIndexMap = topicToIndexMap;
     this.flushTimeoutMs = flushTimeoutMs;
+    this.ignoreMappingErrors = ignoreMappingErrors;
     this.dropInvalidMessage = dropInvalidMessage;
     this.converter = new DataConverter(useCompactMapEntries);
 
@@ -91,7 +94,8 @@ public class ElasticsearchWriter {
         batchSize,
         lingerMs,
         maxRetries,
-        retryBackoffMs
+        retryBackoffMs,
+        ignoreMappingErrors
     );
 
     existingMappings = new HashSet<>();
@@ -113,6 +117,7 @@ public class ElasticsearchWriter {
     private long lingerMs;
     private int maxRetry;
     private long retryBackoffMs;
+    private boolean ignoreMappingErrors;
     private boolean dropInvalidMessage;
 
     public Builder(JestClient client) {
@@ -181,6 +186,11 @@ public class ElasticsearchWriter {
       return this;
     }
 
+    public Builder setIgnoreMappingErrors(boolean ignoreMappingErrors) {
+      this.ignoreMappingErrors = ignoreMappingErrors;
+      return this;
+    }
+    
     public Builder setDropInvalidMessage(boolean dropInvalidMessage) {
       this.dropInvalidMessage = dropInvalidMessage;
       return this;
@@ -203,6 +213,7 @@ public class ElasticsearchWriter {
           lingerMs,
           maxRetry,
           retryBackoffMs,
+          ignoreMappingErrors
           dropInvalidMessage
       );
     }

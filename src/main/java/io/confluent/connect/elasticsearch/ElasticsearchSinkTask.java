@@ -60,12 +60,16 @@ public class ElasticsearchSinkTask extends SinkTask {
 
       ElasticsearchSinkConnectorConfig config = new ElasticsearchSinkConnectorConfig(props);
       String type = config.getString(ElasticsearchSinkConnectorConfig.TYPE_NAME_CONFIG);
+      
       boolean ignoreKey =
           config.getBoolean(ElasticsearchSinkConnectorConfig.KEY_IGNORE_CONFIG);
       boolean ignoreSchema =
           config.getBoolean(ElasticsearchSinkConnectorConfig.SCHEMA_IGNORE_CONFIG);
       boolean useCompactMapEntries =
           config.getBoolean(ElasticsearchSinkConnectorConfig.COMPACT_MAP_ENTRIES_CONFIG);
+      boolean ignoreMappingErrors = 
+          config.getBoolean(ElasticsearchSinkConnectorConfig.IGNORE_MAPPING_ERRORS_CONFIG);
+
 
 
       Map<String, String> topicToIndexMap =
@@ -104,6 +108,7 @@ public class ElasticsearchSinkTask extends SinkTask {
                 TimeUnit.MILLISECONDS.toHours(maxRetryBackoffMs));
       }
 
+
       if (client != null) {
         this.client = client;
       } else {
@@ -131,6 +136,7 @@ public class ElasticsearchSinkTask extends SinkTask {
           .setLingerMs(lingerMs)
           .setRetryBackoffMs(retryBackoffMs)
           .setMaxRetry(maxRetry)
+          .setIgnoreMappingErrors(ignoreMappingErrors);
           .setDropInvalidMessage(dropInvalidMessage);
 
       writer = builder.build();
