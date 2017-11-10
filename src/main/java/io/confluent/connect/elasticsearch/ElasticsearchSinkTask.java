@@ -31,6 +31,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import io.searchbox.client.JestClient;
 import io.searchbox.client.JestClientFactory;
@@ -59,28 +60,66 @@ public class ElasticsearchSinkTask extends SinkTask {
 
       ElasticsearchSinkConnectorConfig config = new ElasticsearchSinkConnectorConfig(props);
       String type = config.getString(ElasticsearchSinkConnectorConfig.TYPE_NAME_CONFIG);
-      boolean ignoreKey = config.getBoolean(ElasticsearchSinkConnectorConfig.KEY_IGNORE_CONFIG);
-      boolean ignoreSchema = config.getBoolean(ElasticsearchSinkConnectorConfig.SCHEMA_IGNORE_CONFIG);
+      
+      boolean ignoreKey =
+          config.getBoolean(ElasticsearchSinkConnectorConfig.KEY_IGNORE_CONFIG);
+      boolean ignoreSchema =
+          config.getBoolean(ElasticsearchSinkConnectorConfig.SCHEMA_IGNORE_CONFIG);
+      boolean useCompactMapEntries =
+          config.getBoolean(ElasticsearchSinkConnectorConfig.COMPACT_MAP_ENTRIES_CONFIG);
+      boolean ignoreMappingErrors = 
+          config.getBoolean(ElasticsearchSinkConnectorConfig.IGNORE_MAPPING_ERRORS_CONFIG);
 
-      Map<String, String> topicToIndexMap = parseMapConfig(config.getList(ElasticsearchSinkConnectorConfig.TOPIC_INDEX_MAP_CONFIG));
-      Set<String> topicIgnoreKey = new HashSet<>(config.getList(ElasticsearchSinkConnectorConfig.TOPIC_KEY_IGNORE_CONFIG));
-      Set<String> topicIgnoreSchema =  new HashSet<>(config.getList(ElasticsearchSinkConnectorConfig.TOPIC_SCHEMA_IGNORE_CONFIG));
 
-      long flushTimeoutMs = config.getLong(ElasticsearchSinkConnectorConfig.FLUSH_TIMEOUT_MS_CONFIG);
-      int maxBufferedRecords = config.getInt(ElasticsearchSinkConnectorConfig.MAX_BUFFERED_RECORDS_CONFIG);
-      int batchSize = config.getInt(ElasticsearchSinkConnectorConfig.BATCH_SIZE_CONFIG);
-      long lingerMs = config.getLong(ElasticsearchSinkConnectorConfig.LINGER_MS_CONFIG);
-      int maxInFlightRequests = config.getInt(ElasticsearchSinkConnectorConfig.MAX_IN_FLIGHT_REQUESTS_CONFIG);
-      long retryBackoffMs = config.getLong(ElasticsearchSinkConnectorConfig.RETRY_BACKOFF_MS_CONFIG);
-      int maxRetry = config.getInt(ElasticsearchSinkConnectorConfig.MAX_RETRIES_CONFIG);
-      boolean ignoreMappingErrors = config.getBoolean(ElasticsearchSinkConnectorConfig.IGNORE_MAPPING_ERRORS_CONFIG);
+
+      Map<String, String> topicToIndexMap =
+          parseMapConfig(config.getList(ElasticsearchSinkConnectorConfig.TOPIC_INDEX_MAP_CONFIG));
+      Set<String> topicIgnoreKey =
+          new HashSet<>(config.getList(ElasticsearchSinkConnectorConfig.TOPIC_KEY_IGNORE_CONFIG));
+      Set<String> topicIgnoreSchema = new HashSet<>(
+          config.getList(ElasticsearchSinkConnectorConfig.TOPIC_SCHEMA_IGNORE_CONFIG)
+      );
+
+      long flushTimeoutMs =
+          config.getLong(ElasticsearchSinkConnectorConfig.FLUSH_TIMEOUT_MS_CONFIG);
+      int maxBufferedRecords =
+          config.getInt(ElasticsearchSinkConnectorConfig.MAX_BUFFERED_RECORDS_CONFIG);
+      int batchSize =
+          config.getInt(ElasticsearchSinkConnectorConfig.BATCH_SIZE_CONFIG);
+      long lingerMs =
+          config.getLong(ElasticsearchSinkConnectorConfig.LINGER_MS_CONFIG);
+      int maxInFlightRequests =
+          config.getInt(ElasticsearchSinkConnectorConfig.MAX_IN_FLIGHT_REQUESTS_CONFIG);
+      long retryBackoffMs =
+          config.getLong(ElasticsearchSinkConnectorConfig.RETRY_BACKOFF_MS_CONFIG);
+      int maxRetry =
+          config.getInt(ElasticsearchSinkConnectorConfig.MAX_RETRIES_CONFIG);
+      boolean dropInvalidMessage =
+          config.getBoolean(ElasticsearchSinkConnectorConfig.DROP_INVALID_MESSAGE_CONFIG);
+
+      // Calculate the maximum possible backoff time ...
+      long maxRetryBackoffMs = RetryUtil.computeRetryWaitTimeInMillis(maxRetry, retryBackoffMs);
+      if (maxRetryBackoffMs > RetryUtil.MAX_RETRY_TIME_MS) {
+        log.warn("This connector uses exponential backoff with jitter for retries, "
+                + "and using '{}={}' and '{}={}' results in an impractical but possible maximum "
+                + "backoff time greater than {} hours.",
+                ElasticsearchSinkConnectorConfig.MAX_RETRIES_CONFIG, maxRetry,
+                ElasticsearchSinkConnectorConfig.RETRY_BACKOFF_MS_CONFIG, retryBackoffMs,
+                TimeUnit.MILLISECONDS.toHours(maxRetryBackoffMs));
+      }
+
 
       if (client != null) {
         this.client = client;
       } else {
-        List<String> address = config.getList(ElasticsearchSinkConnectorConfig.CONNECTION_URL_CONFIG);
+        List<String> address =
+            config.getList(ElasticsearchSinkConnectorConfig.CONNECTION_URL_CONFIG);
         JestClientFactory factory = new JestClientFactory();
-        factory.setHttpClientConfig(new HttpClientConfig.Builder(address).multiThreaded(true).build());
+        factory.setHttpClientConfig(
+            new HttpClientConfig.Builder(address)
+                .multiThreaded(true)
+                .build()
+        );
         this.client = factory.getObject();
       }
 
@@ -88,6 +127,7 @@ public class ElasticsearchSinkTask extends SinkTask {
           .setType(type)
           .setIgnoreKey(ignoreKey, topicIgnoreKey)
           .setIgnoreSchema(ignoreSchema, topicIgnoreSchema)
+          .setCompactMapEntries(useCompactMapEntries)
           .setTopicToIndexMap(topicToIndexMap)
           .setFlushTimoutMs(flushTimeoutMs)
           .setMaxBufferedRecords(maxBufferedRecords)
@@ -97,11 +137,15 @@ public class ElasticsearchSinkTask extends SinkTask {
           .setRetryBackoffMs(retryBackoffMs)
           .setMaxRetry(maxRetry)
           .setIgnoreMappingErrors(ignoreMappingErrors);
+          .setDropInvalidMessage(dropInvalidMessage);
 
       writer = builder.build();
       writer.start();
     } catch (ConfigException e) {
-      throw new ConnectException("Couldn't start ElasticsearchSinkTask due to configuration error:", e);
+      throw new ConnectException(
+          "Couldn't start ElasticsearchSinkTask due to configuration error:",
+          e
+      );
     }
   }
 

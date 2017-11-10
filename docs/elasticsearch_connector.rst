@@ -27,42 +27,86 @@ Quickstart
 In this Quickstart, we use the Elasticsearch connector to export data produced by the Avro console
 producer to Elasticsearch.
 
-Start Zookeeper, Kafka and Schema Registry if you haven't done so. You also need to have
-Elasticsearch running locally or remotely and make sure that you know the address to connect to
-Elasticsearch.
+First, start all the necessary services using Confluent CLI:
 
-.. ifconfig:: platform_docs
+.. tip::
 
-   The instructions on how to start these services are available at the
-   :ref:`Confluent Platform quickstart<quickstart>`.
+   If not already in your PATH, add Confluent's ``bin`` directory by running: ``export PATH=<path-to-confluent>/bin:$PATH``
 
-This Quickstart assumes that you started the required services with the default configurations.
-If you are not using the default settings, you should adjust the subsequent commands to account for
-different hostnames and ports.
+.. sourcecode:: bash
 
-First, start the Avro console producer::
+   $ confluent start
+
+Every service will start in order, printing a message with its status:
+
+.. sourcecode:: bash
+
+    Starting zookeeper
+    zookeeper is [UP]
+    Starting kafka
+    kafka is [UP]
+    Starting schema-registry
+    schema-registry is [UP]
+    Starting kafka-rest
+    kafka-rest is [UP]
+    Starting connect
+    connect is [UP]
+
+Next, start the Avro console producer to import a few records to Kafka:
+
+.. sourcecode:: bash
 
   $ ./bin/kafka-avro-console-producer --broker-list localhost:9092 --topic test-elasticsearch-sink \
   --property value.schema='{"type":"record","name":"myrecord","fields":[{"name":"f1","type":"string"}]}'
 
-Then in the console producer, type in::
+Then in the console producer, type in:
+
+.. sourcecode:: bash
 
   {"f1": "value1"}
-
+  {"f1": "value2"}
+  {"f1": "value3"}
 
 The three records entered are published to the Kafka topic ``test-elasticsearch`` in Avro format.
 
 Before starting the connector, please make sure that the configurations in
 ``etc/kafka-connect-elasticsearch/quickstart-elasticsearch.properties`` are properly set to your
 configurations of Elasticsearch, e.g. ``connection.url`` points to the correct http address.
-Then run the following command to start Kafka Connect with the Elasticsearch connector::
+Then start the Elasticsearch connector by loading its configuration with the following command:
+
+.. sourcecode:: bash
 
   $ ./bin/connect-standalone etc/schema-registry/connect-avro-standalone.properties \
   etc/kafka-connect-elasticsearch/quickstart-elasticsearch.properties
 
-You should see that the process starts up and logs some messages, and then exports data from Kafka
-to Elasticsearch. Once the connector finishes ingesting data to Elasticsearch, check that the data
-is available in Elasticsearch::
+.. sourcecode:: bash
+
+   $ confluent load elasticsearch-sink
+   {
+     "name": "elasticsearch-sink",
+     "config": {
+       "connector.class": "io.confluent.connect.elasticsearch.ElasticsearchSinkConnector",
+       "tasks.max": "1",
+       "topics": "test-elasticsearch-sink",
+       "key.ignore": "true",
+       "connection.url": "http://localhost:9200",
+       "type.name": "kafka-connect",
+       "name": "elasticsearch-sink"
+     },
+     "tasks": []
+   }
+
+To check that the connector started successfully view the Connect worker's log by running:
+
+.. sourcecode:: bash
+
+  $ confluent log connect
+
+Towards the end of the log you should see that the connector starts, logs a few messages, and then exports
+data from Kafka to Elasticsearch.
+Once the connector finishes ingesting data to Elasticsearch, check that the data is available in Elasticsearch:
+
+.. sourcecode:: bash
 
   $ curl -XGET 'http://localhost:9200/test-elasticsearch-sink/_search?pretty'
   {
@@ -87,6 +131,39 @@ is available in Elasticsearch::
      }]
    }
   }
+
+Finally, stop the Connect worker as well as all the rest of the Confluent services by running:
+
+.. sourcecode:: bash
+
+      $ confluent stop
+      Stopping connect
+      connect is [DOWN]
+      Stopping kafka-rest
+      kafka-rest is [DOWN]
+      Stopping schema-registry
+      schema-registry is [DOWN]
+      Stopping kafka
+      kafka is [DOWN]
+      Stopping zookeeper
+      zookeeper is [DOWN]
+
+or stop all the services and additionally wipe out any data generated during this quickstart by running:
+
+.. sourcecode:: bash
+
+      $ confluent destroy
+      Stopping connect
+      connect is [DOWN]
+      Stopping kafka-rest
+      kafka-rest is [DOWN]
+      Stopping schema-registry
+      schema-registry is [DOWN]
+      Stopping kafka
+      kafka is [DOWN]
+      Stopping zookeeper
+      zookeeper is [DOWN]
+      Deleting: /tmp/confluent.w1CpYsaI
 
 Features
 --------
@@ -163,6 +240,64 @@ The following change is not allowed:
 * **Changing types that can not be merged**: Changing a field from integer type to string type.
 
 As mappings are more flexible, schema compatibility should be enforced when writing data to Kafka.
+
+Automatic Retries
+-----------------
+The Elasticsearch connector may experience problems writing to the Elasticsearch endpoint, such as when
+the Elasticsearch service is temporarily overloaded. In many cases, the connector will retry the request
+a number of times before failing. To prevent from further overloading the Elasticsearch service, the connector
+uses an exponential backoff technique to give the Elasticsearch service time to recover. The technique
+adds randomness, called jitter, to the calculated backoff times to prevent a thundering herd, where large
+numbers of requests from many tasks are submitted concurrently and overwhelm the service. Randomness spreads out
+the retries from many tasks and should reduce the overall time required to complete all outstanding requests
+compared to simple exponential backoff. The goal is to spread out the requests to Elasticsearch as much as
+possible.
+
+The number of retries is dictated by the ``max.retries`` connector configuration property, which defaults
+to 5 attempts. The backoff time, which is the amount of time to wait before retrying, is a function of the
+retry attempt number and the initial backoff time specified in the ``retry.backoff.ms`` connector configuration
+property, which defaults to 500 milliseconds. For example, the following table shows the possible wait times
+before submitting each of the 5 retry attempts:
+
+.. table:: Range of backoff times for each retry using the default configuration
+   :widths: auto
+
+   =====  =====================  =====================  ==============================================
+   Retry  Minimum Backoff (sec)  Maximum Backoff (sec)  Total Potential Delay from First Attempt (sec)
+   =====  =====================  =====================  ==============================================
+     1         0.0                      0.5                              0.5
+     2         0.0                      1.0                              1.5
+     3         0.0                      2.0                              3.5
+     4         0.0                      4.0                              7.5
+     5         0.0                      8.0                             15.5
+   =====  =====================  =====================  ==============================================
+
+Note how the maximum wait time is simply the normal exponential backoff, calculated as ``${retry.backoff.ms} * 2 ^ (retry-1)``.
+Increasing the maximum number of retries adds more backoff:
+
+.. table:: Range of backoff times for additional retries
+   :widths: auto
+
+   =====  =====================  =====================  ==============================================
+   Retry  Minimum Backoff (sec)  Maximum Backoff (sec)  Total Potential Delay from First Attempt (sec)
+   =====  =====================  =====================  ==============================================
+     6         0.0                     16.0                             31.5
+     7         0.0                     32.0                             63.5
+     8         0.0                     64.0                            127.5
+     9         0.0                    128.0                            256.5
+    10         0.0                    256.0                            511.5
+    11         0.0                    512.0                           1023.5
+    12         0.0                   1024.0                           2047.5
+    13         0.0                   2048.0                           4095.5
+   =====  =====================  =====================  ==============================================
+
+By increasing ``max.retries`` to 10, the connector may take up to 511.5 seconds, or a little over 8.5 minutes,
+to successfully send a batch of records when experiencing an overloaded Elasticsearch service. Increasing the value
+to 13 quickly increases the maximum potential time to submit a batch of records to well over 1 hour 8 minutes.
+
+You can adjust both the ``max.retries`` and ``retry.backoff.ms`` connector configuration properties to achieve
+the desired backoff and retry characteristics.
+
 
 Reindexing
 ----------
