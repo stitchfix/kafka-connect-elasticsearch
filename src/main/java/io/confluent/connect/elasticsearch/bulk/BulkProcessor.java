@@ -352,8 +352,8 @@ public class BulkProcessor<R, B> {
           if (bulkRsp.isSucceeded()) {
             return bulkRsp;
           }
-          if (ignoreMappingErrors && bulkRsp.getErrorInfo().contains("mapper_parsing_exception")) {
-            log.info("Encountered mapper_parsing_exception when execute batch {} of {} records. Ignoring. {}",
+          if (ignoreMappingErrors && (bulkRsp.getErrorInfo().contains("mapper_parsing_exception") || bulkRsp.getErrorInfo().contains("illegal_argument_exception"))) {
+            log.info("Encountered mapper_parsing_exception when executing batch {} of {} records. Ignoring. {}",
                 batchId, batch.size(), bulkRsp.getErrorInfo());
             return bulkRsp;
           }
